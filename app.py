@@ -3,10 +3,12 @@ import joblib
 import pandas as pd
 import logging
 
+app = Flask(__name__)
+
 # Logging
 logging.basicConfig(level=logging.INFO)
 
-app = Flask(__name__)
+
 
 # Load model and scaler
 try:
