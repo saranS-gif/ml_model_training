@@ -1,99 +1,65 @@
 from flask import Flask, request, jsonify
 import joblib
 import pandas as pd
+import numpy as np
 import logging
+from datetime import datetime
 
 app = Flask(__name__)
 
-# Logging
-logging.basicConfig(level=logging.INFO)
+# Set up logging configuration
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler("prediction_logs.log"),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
 
 
 
-# Load model and scaler
-try:
-    model = joblib.load("tuned_diabetes_model_rf.joblib")
-    scaler = joblib.load("scaler.joblib")
-    print("✅ Model and Scaler Loaded Successfully")
-except Exception as e:
-    print(f"❌ Error Loading Files: {e}")
-    raise
+# Load the assets
+model = joblib.load('tuned_diabetes_model_rf.joblib')
+scaler = joblib.load('scaler.joblib')
+feature_names = ['Pregnancies', 'Glucose', 'BloodPressure', 'SkinThickness', 'Insulin', 'BMI', 'DiabetesPedigreeFunction', 'Age']
 
-# Features used during training
-FEATURE_NAMES = [
-    'Pregnancies',
-    'Glucose',
-    'BloodPressure',
-    'SkinThickness',
-    'Insulin',
-    'BMI',
-    'DiabetesPedigreeFunction',
-    'Age'
-]
-
-@app.route("/")
-def home():
-    return jsonify({
-        "message": "Diabetes Prediction API Running"
-    })
-
-@app.route("/predict", methods=["POST"])
+@app.route('/predict', methods=['POST'])
 def predict():
     try:
+        # Get JSON data from request
         data = request.get_json()
-
-        if not data:
-            return jsonify({
-                "error": "No JSON data received"
-            }), 400
-
-        # Check missing fields
-        missing = [f for f in FEATURE_NAMES if f not in data]
-
-        if missing:
-            return jsonify({
-                "error": f"Missing fields: {missing}"
-            }), 400
-
-        # Create dataframe
-        input_df = pd.DataFrame(
-            [[data[col] for col in FEATURE_NAMES]],
-            columns=FEATURE_NAMES
-        )
-
-        # Scale input
-        scaled_input = scaler.transform(input_df)
-
+        logger.info(f"Incoming prediction request: {data}")
+        
+        # Convert to DataFrame
+        input_df = pd.DataFrame([data], columns=feature_names)
+        
+        # Scale data
+        scaled_data = scaler.transform(input_df)
+        scaled_df = pd.DataFrame(scaled_data, columns=feature_names)
+        
         # Predict
-        prediction = int(model.predict(scaled_input)[0])
-
-        # Probability
-        if hasattr(model, "predict_proba"):
-            probabilities = model.predict_proba(scaled_input)[0]
-
-            diabetic_prob = float(probabilities[1])
-            non_diabetic_prob = float(probabilities[0])
-        else:
-            diabetic_prob = None
-            non_diabetic_prob = None
-
+        prediction = model.predict(scaled_df)[0]
+        probability = model.predict_proba(scaled_df)[0].tolist()
+        
         result = {
-            "prediction": prediction,
+            "prediction": int(prediction),
             "status": "Diabetic" if prediction == 1 else "Non-Diabetic",
             "confidence_scores": {
-                "non_diabetic": non_diabetic_prob,
-                "diabetic": diabetic_prob
+                "non_diabetic": probability[0],
+                "diabetic": probability[1]
             }
         }
 
+        logger.info(f"Prediction result: {result['status']} (Confidence: {max(probability):.2%})")
         return jsonify(result)
 
     except Exception as e:
-        logging.error(str(e))
+        logger.error(f"Error during prediction: {str(e)}")
+        return jsonify({"error": str(e)}), 400
 
-        return jsonify({
-            "error": str(e)
-        }), 500
+
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
